@@ -1,4 +1,14 @@
-from where import condition
+"""
+    diamond.models
+    ~~~~~~~~~~~~~~
+
+    :copyright: (c) 2015 Jaco Ruit 
+    :license: MIT, see LICENSE for more details
+"""
+
+
+import new
+from diamond.clauses import condition
 
 class Field(object):
     def __init__(self, type, primary_key = False):
@@ -11,9 +21,9 @@ class Field(object):
         return type(value) == self.type
     
     def __condition(self, comparer, value):
-        if not self.is_acceptable_value(value):
+        if not isinstance(value, Field) and not self.is_acceptable_value(value):
             raise Exception("Invalid type for %s" % self.name)
-        return condition(self.name, comparer, value)
+        return condition(self, comparer, value)
     
     def equals(self, value):
         return self.__condition("=", value)
@@ -39,10 +49,27 @@ class Field(object):
     def notlike(self, value):
         return self.__condition("not like", value)
     
+    def get_table(self):
+        return self.table
+    
+    def get_columns(self):
+        return [("field", self.table, self.name)]
+    
+    def handle_row(self, row):
+        return self.type(row[0])
+    
+    
+class Collection(object):
+    def __init__(self, name, modeltype, clause):
+        self.modeltype = modeltype
+        self.clause = clause
+        self.name = name
+    
 
 class Model(object):
     Table = ""
     Fields = []
+    Collections = []
     
     def save(self): raise Exception("Call create_model first and make sure your model has a primary key")
     
@@ -50,9 +77,8 @@ class Model(object):
     def get(pk): raise Exception("Call create_model first and make sure your model has a primary key")
     
     @staticmethod
-    def edit(pk, **kwargs): raise Exception("Call create_model first and make sure your model has a primary key")
+    def edit(pk, **kwargs): raise Exception("Call create_model first and make sure your model has a primary key")        
     
-
 def get_field(modeltype, fieldname):
     for  field in modeltype.Fields:
         if field.name == fieldname: return field
@@ -68,8 +94,26 @@ def create_model(diamond, modeltype):
             value.name = name
             value.table = modeltype.Table
             modeltype.Fields.append(value)
+        #elif isinstance(value, Collection):
+        #    modeltype.Collections.append(value)
 
-    if pk_field == None: return
+    if pk_field == None: 
+        raise Exception("Diamond doesn't allow models without a primary key")
+    
+    @staticmethod
+    def get_table():
+        return modeltype.Table 
+    modeltype.get_table = get_table
+       
+    @staticmethod
+    def get_columns():
+        return [("field", modeltype.Table, field.name) for field in modeltype.Fields]
+    modeltype.get_columns = get_columns
+        
+    @staticmethod
+    def handle_row(row):
+        return build_model_instance(modeltype, row)
+    modeltype.handle_row = handle_row
     
     @staticmethod
     def get(pk):
@@ -86,7 +130,24 @@ def create_model(diamond, modeltype):
         if not affected or affected < 1: return False
         return True
     modeltype.edit = edit
-    
+       
+    def add_collections(model): 
+        for i in range(0, len(modeltype.Collections)):
+            setattr(model, "__collection_%i" % i, None)
+        
+        for i in range(0, len(modeltype.Collections)):
+            collection = modeltype.Collections[i]
+            def retriever(self):
+                pk_value = getattr(self, pk_field.name)
+                value = getattr(self, "__collection_%i" % i)
+                if value == None: 
+                    print "selecting"
+                    rows = diamond.select(collection.modeltype).join(modeltype, pk_field.equals(pk_value) & collection.clause).execute()
+                    value = [row[0] for row in rows]
+                    setattr(model, "__collection_%i" % i, value) 
+                return value
+            setattr(model, collection.name, new.instancemethod(retriever, model, type(model)))
+
     def __init__(self, **kwargs):
         if pk_field.name in kwargs.keys():
             raise Exception("You can't provide a primary key")
@@ -96,6 +157,7 @@ def create_model(diamond, modeltype):
             if not field.is_acceptable_value(value):
                 raise Exception("Invalid type for %s" % field.name)
             setattr(self, field.name, value)
+        add_collections(self)
     modeltype.__init__ = __init__
     
     def save(self):
@@ -111,7 +173,9 @@ def create_model(diamond, modeltype):
             fieldvalues[field] = value
         if new:
             pk_new = diamond.add(self).set(fieldvalues).execute()
-            if pk_new != False: setattr(self, pk_field.name, pk_field.type(pk_new))
+            if pk_new != False: 
+                setattr(self, pk_field.name, pk_field.type(pk_new))
+                add_collections(self)
             return pk_new != False
         affected = diamond.edit(self).set(fieldvalues).where(pk_field.equals(pk_value)).execute()
         return False if not affected or affected < 1 else True

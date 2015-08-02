@@ -1,57 +1,44 @@
-from diamond.models import build_model_instance, Model
-from diamond.where import parsable
+"""
+    diamond.queries
+    ~~~~~~~~~~~~~~~
 
-class SelectFunction(object):
-    def __init__(self, name, field):
-        self.name = name
-        self.field = field
-        
-    def handle_rows(self, rows):
-        return rows
+    :copyright: (c) 2015 Jaco Ruit 
+    :license: MIT, see LICENSE for more details
+"""
 
-class summation(SelectFunction):
-    def __init__(self, field):
-        super(summation, self).__init__("sum", field)
-    
-    def handle_rows(self, rows):
-        if len(rows) < 1: return None
-        return int(rows[0][0])
 
-class count(SelectFunction):
-    def __init__(self, obj):
-        field = None
-        if(issubclass(obj, Model)):
-            for mfield in obj.Fields:
-                if mfield.primary_key: field = mfield
-            if field == None: raise Exception("Model has to have a primary key, or supply a field")
-        else: field = obj
-        super(count, self).__init__("count", field)
-    
-    def handle_rows(self, rows):
-        if len(rows) < 1: return None
-        return int(rows[0][0])
+from diamond.clauses import parsable
 
 class Query(object):
-    def __init__(self, diamond, modeltype):
+    def __init__(self, diamond):
         self.diamond = diamond
-        self.modeltype = modeltype
     
     def execute(self):
         pass
     
 class SelectQuery(Query):
-    def __init__(self, diamond, type, obj):
-        super(SelectQuery, self).__init__(diamond, None if type == "fn" else obj)
-        self.selectfunction = None if type == "models" else obj
-        self.__type = type
+    def __init__(self, diamond, selectables):
+        super(SelectQuery, self).__init__(diamond)
+        self.selectables = selectables
+        if len(self.selectables) < 1: 
+            raise Exception("You have to provide at least one selectable object")
+        self.table = self.selectables[0].get_table()
+        for selectable in self.selectables:
+            if selectable.get_table() != self.table:
+                raise Exception("Can't select data from different tables. Use joins!")
         self.__where = None
         self.__groupby_field_name = None
         self.__limit = None
+        self.__offset = None
+        self.__joins = []
 
     def where(self, node):
         if self.__where != None: raise Exception("Where already set!")
         self.__where = parsable(node)
         return self
+    
+    def sortby(self):
+        pass #TODO implement
     
     def groupby(self, groupby_field):
         if self.__groupby_field_name != None: raise Exception("Group by field already set")
@@ -63,39 +50,67 @@ class SelectQuery(Query):
         self.__limit = limit
         return self
     
-    def __execute_models(self):
-        models = []
-        rows = self.diamond.db.select(self.modeltype.Table, 
-                                      [field.name for field in self.modeltype.Fields],
+    def join(self, selectable, on_clause):
+        self.__joins.append((selectable, parsable(on_clause)))
+        return self
+    
+    def offset(self, offset):
+        self.__offset = offset
+    
+    def lazyiter(self):
+        offset = 0 
+        while True:
+            rows = self.execute(limit = 1, offset = offset)
+            if len(rows) < 1: break
+            yield rows[0]
+            offset += 1
+    
+    def execute(self, **overwrite_parameters):
+        columns = []
+        selectable_column_indices = []
+        
+        selectables = self.selectables
+        joins = []
+        
+        for jselectable,jclause in self.__joins:
+            selectables.append(jselectable)
+            joins.append((jselectable.get_table(), jclause))
+        
+        p = 0
+        for selectable in selectables:
+            selectable_columns = selectable.get_columns()
+            columns += selectable_columns
+            np = p + len(selectable_columns)
+            selectable_column_indices.append((p, np))
+            p = np
+            
+        limit = self.__limit if not "limit" in overwrite_parameters.keys() else overwrite_parameters["limit"]
+        offset = self.__offset if not "offset" in overwrite_parameters.keys() else overwrite_parameters["offset"]
+        
+        rows = self.diamond.db.select(self.table, 
+                                      columns,
                                       where = self.__where,
                                       groupby_field_name = self.__groupby_field_name,
-                                      limit = self.__limit,
+                                      limit = limit,
+                                      offset = offset,
+                                      joins = joins,
                                       print_query = self.diamond.debug)
+        
+        nrows = []
         for row in rows:
-            models.append(build_model_instance(self.modeltype, row))
-        if self.__limit == 1:
-            return models[0] if len(models) > 0 else None
-        return models
-    
-    def __execute_fn(self):
-        rows = self.diamond.db.selectfn(self.selectfunction.field.table,
-                                        self.selectfunction.name, 
-                                        self.selectfunction.field.name,
-                                        where = self.__where,
-                                        groupby_field_name = self.__groupby_field_name,
-                                        limit = self.__limit,
-                                        print_query = self.diamond.debug)
-        return self.selectfunction.handle_rows(rows)
-    
-    def execute(self):
-        if self.__type == "fn": return self.__execute_fn()
-        if self.__type == "models": return self.__execute_models()
-        raise Exception("Invalid SelectQuery type")
+            nrow = []
+            for i in range(0, len(selectables)):
+                idx1, idx2 = selectable_column_indices[i]
+                nrow.append(selectables[i].handle_row(row[idx1:idx2]))
+            if len(selectables) < 2: nrows.append(nrow[0]) 
+            else: nrows.append(nrow)
+        return nrows
 
     
 class EditQuery(Query):
     def __init__(self, diamond, modeltype):
-        super(EditQuery, self).__init__(diamond, modeltype)
+        super(EditQuery, self).__init__(diamond)
+        self.modeltype = modeltype
         self.__where = None
         self.__set = {}
 
@@ -124,7 +139,8 @@ class EditQuery(Query):
 
 class AddQuery(Query):
     def __init__(self, diamond, modeltype):
-        super(AddQuery, self).__init__(diamond, modeltype)
+        super(AddQuery, self).__init__(diamond)
+        self.modeltype = modeltype
         self.__set = {}
     
     def set(self, val1, val2 = None):
@@ -145,7 +161,8 @@ class AddQuery(Query):
             
 class RemoveQuery(Query):
     def __init__(self, diamond, modeltype):
-        super(RemoveQuery, self).__init__(diamond, modeltype)
+        super(RemoveQuery, self).__init__(diamond)
+        self.modeltype = modeltype
         self.__where = None   
     
     def where(self, node):

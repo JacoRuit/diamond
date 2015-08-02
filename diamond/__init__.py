@@ -1,18 +1,20 @@
-from queries import SelectQuery, EditQuery, AddQuery, RemoveQuery, SelectFunction
-from models import Model
-import types
+"""
+    diamond
+    ~~~~~~~
+
+    :copyright: (c) 2015 Jaco Ruit 
+    :license: MIT, see LICENSE for more details
+"""
+
+from queries import SelectQuery, EditQuery, AddQuery, RemoveQuery
 
 class Diamond(object):
     def __init__(self, database):
         self.db = database
         self.debug = False
     
-    def select(self, obj):
-        if isinstance(obj,  type) and issubclass(obj, Model):
-            return SelectQuery(self, "models", obj)
-        if issubclass(type(obj), SelectFunction):
-            return SelectQuery(self, "fn", obj)
-        raise Exception("Invalid object passed to select")
+    def select(self, *args):
+        return SelectQuery(self, list(args))
     
     def edit(self, modeltype):
         return EditQuery(self, modeltype)
