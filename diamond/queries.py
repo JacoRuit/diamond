@@ -31,14 +31,16 @@ class SelectQuery(Query):
         self.__limit = None
         self.__offset = None
         self.__joins = []
+        self.__orderby = []
 
     def where(self, node):
         if self.__where != None: raise Exception("Where already set!")
         self.__where = parsable(node)
         return self
     
-    def sortby(self):
-        pass #TODO implement
+    def orderby(self, selectable, asc = False):
+        self.__orderby.append((selectable.get_columns(), asc))
+        return self
     
     def groupby(self, groupby_field):
         if self.__groupby_field_name != None: raise Exception("Group by field already set")
@@ -90,6 +92,7 @@ class SelectQuery(Query):
         rows = self.diamond.db.select(self.table, 
                                       columns,
                                       where = self.__where,
+                                      orderby = self.__orderby,
                                       groupby_field_name = self.__groupby_field_name,
                                       limit = limit,
                                       offset = offset,
@@ -131,6 +134,7 @@ class EditQuery(Query):
         for (field, value) in self.__set.items():
             if not field.is_acceptable_value(value):
                 raise Exception("Invalid type for %s" % field.name)
+            if field.type == bool: value = 1 if value else 0
             fieldnamevalues[field.name] = value
         return self.diamond.db.edit(self.modeltype.Table,
                                     fieldnamevalues,
@@ -154,6 +158,7 @@ class AddQuery(Query):
         for (field, value) in self.__set.items():
             if not field.is_acceptable_value(value):
                 raise Exception("Invalid type for %s" % field.name)
+            if field.type == bool: value = 1 if value else 0
             fieldnamevalues[field.name] = value
         return self.diamond.db.add(self.modeltype.Table,
                                    fieldnamevalues,

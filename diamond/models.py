@@ -60,10 +60,11 @@ class Field(object):
     
     
 class Collection(object):
-    def __init__(self, name, modeltype, clause):
+    def __init__(self, name, modeltype, clause, orderby = None):
         self.modeltype = modeltype
         self.clause = clause
         self.name = name
+        self.orderby = None
     
 
 class Model(object):
@@ -87,6 +88,7 @@ def get_field(modeltype, fieldname):
 def create_model(diamond, modeltype):   
     pk_field = None
     modeltype.Fields = []
+    modeltype.Collections = []
     for name in dir(modeltype):
         value = getattr(modeltype, name)
         if type(value) == Field:
@@ -94,8 +96,8 @@ def create_model(diamond, modeltype):
             value.name = name
             value.table = modeltype.Table
             modeltype.Fields.append(value)
-        #elif isinstance(value, Collection):
-        #    modeltype.Collections.append(value)
+        elif isinstance(value, Collection):
+            modeltype.Collections.append(value)
 
     if pk_field == None: 
         raise Exception("Diamond doesn't allow models without a primary key")
@@ -117,7 +119,9 @@ def create_model(diamond, modeltype):
     
     @staticmethod
     def get(pk):
-        return diamond.select(modeltype).where(pk_field.equals(pk)).limit(1).execute()
+        rows = diamond.select(modeltype).where(pk_field.equals(pk)).limit(1).execute()
+        if len(rows) < 1: return None
+        return rows[0]
     modeltype.get = get
     
     @staticmethod
@@ -142,7 +146,9 @@ def create_model(diamond, modeltype):
                 value = getattr(self, "__collection_%i" % i)
                 if value == None: 
                     print "selecting"
-                    rows = diamond.select(collection.modeltype).join(modeltype, pk_field.equals(pk_value) & collection.clause).execute()
+                    query = diamond.select(collection.modeltype).join(modeltype, pk_field.equals(pk_value) & collection.clause)
+                    if collection.orderby != None: query.orderby(collection.orderby)
+                    rows = query.execute()
                     value = [row[0] for row in rows]
                     setattr(model, "__collection_%i" % i, value) 
                 return value

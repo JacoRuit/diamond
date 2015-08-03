@@ -7,13 +7,15 @@
 """
 
 from __future__ import absolute_import
-from flask import _request_ctx_stack
+try:
+    from flask import _app_ctx_stack as stack
+except ImportError:
+    from flask import _request_ctx_stack as stack
 from diamond import Diamond
 
 
 class FlaskyDiamond(object):
-    def __init__(self, app, credentials, databaseinterface):
-        
+    def __init__(self, credentials, databaseinterface):
         self.credentials = credentials
         self.databaseinterface = databaseinterface
         
@@ -24,15 +26,15 @@ class FlaskyDiamond(object):
             app.teardown_request(self.teardown)
 
     def teardown(self, exception):
-        ctx = _request_ctx_stack.top
+        ctx = stack.top
         if hasattr(ctx, "diamond"):
             ctx.diamond.close()
     
     @property
     def diamond(self):
-        ctx = _request_ctx_stack.top
+        ctx = stack.top
         if ctx is not None:
             if not hasattr(ctx, "diamond"):
-                ctx.diamond = Diamond(self.databaseinterface)
+                ctx.diamond = Diamond(self.databaseinterface())
                 ctx.diamond.connect(self.credentials)
             return ctx.diamond

@@ -13,7 +13,7 @@ class MySQLDatabase(DatabaseInterface):
     def __init__(self):
         self.connection = None
         
-    def select(self, table, columns, where = None, limit = None, offset = None, groupby_field_name = None, joins = None, print_query = False):
+    def select(self, table, columns, where = None, limit = None, offset = None, orderby = None, groupby_field_name = None, joins = None, print_query = False):
         if self.connection == None: raise Exception("Not connected to MySQL")
         self.connection.commit()
         
@@ -24,6 +24,7 @@ class MySQLDatabase(DatabaseInterface):
             for jtable, jclause in joins:
                 query += " INNER JOIN `%s` ON %s " % (jtable, parsable_clauses_to_sql(jclause))
         if where != None: query += " WHERE %s" %  parsable_clauses_to_sql(where)
+        if orderby != None and len(orderby) > 0: query += " ORDER BY " + " ".join("%s %s" % (columns_to_sql(column), "ASC" if asc else "DESC") for column, asc in orderby)
         if limit != None: query += " LIMIT %i" % limit   
         if offset != None: query += " OFFSET %i" % offset
         if groupby_field_name != None: query += " GROUP BY `%s`" % groupby_field_name
@@ -116,7 +117,7 @@ def columns_to_sql(columns):
             sql.append(string)
         else:
             sql.append(fn_to_sql(type) + "(" + string + ")")
-    return ",".join(sql)
+    return ",".join(sql) if len(sql) > 1 else sql[0]
             
 def fn_to_sql(fn_name):
     return fn_name.upper()
